@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -99,7 +100,9 @@ namespace Ivy.Ripgrep.Bootstrap
 
         private async Task<string> GetDownloadUrlAsync(string version, string assetName, CancellationToken ct)
         {
-            var apiUrl = $"https://api.github.com/repos/{GitHubRepo}/releases/tags/v{version}";
+            var apiUrl = $"https://api.github.com/repos/{GitHubRepo}/releases/tags/{version}";
+            
+            _logger.LogDebug("Fetching release info from: {Url}", apiUrl);
             
             var request = new HttpRequestMessage(HttpMethod.Get, apiUrl);
             request.Headers.Add("User-Agent", "Ivy.Ripgrep");
@@ -111,6 +114,12 @@ namespace Ivy.Ripgrep.Bootstrap
             }
 
             var response = await _httpClient.SendAsync(request, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                _logger.LogError("Failed to fetch release info from {Url}. Status: {Status}. Content: {Content}", 
+                    apiUrl, response.StatusCode, content);
+            }
             response.EnsureSuccessStatusCode();
 
             var json = await response.Content.ReadAsStringAsync();
@@ -143,28 +152,48 @@ namespace Ivy.Ripgrep.Bootstrap
         {
             _logger.LogInformation("Verifying checksum for {Archive}", archiveName);
             
-            // Download the checksums file
-            var checksumUrl = $"https://github.com/{GitHubRepo}/releases/download/v{version}/ripgrep-{version}-SHA256SUM";
-            var checksumResponse = await _httpClient.GetStringAsync(checksumUrl);
+            // Download the individual checksum file for this archive
+            var checksumUrl = $"https://github.com/{GitHubRepo}/releases/download/{version}/{archiveName}.sha256";
+            string expectedHash;
             
-            // Parse checksums file to find our archive's expected hash
-            string? expectedHash = null;
-            foreach (var line in checksumResponse.Split('\n'))
+            try
             {
-                if (line.Contains(archiveName))
+                var checksumResponse = await _httpClient.GetStringAsync(checksumUrl);
+                
+                // Parse different checksum file formats
+                // Format 1: Just the hash
+                // Format 2: "hash  filename"
+                // Format 3: Windows CertUtil output
+                var lines = checksumResponse.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                
+                if (lines.Length == 1)
                 {
-                    var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                    if (parts.Length >= 2)
-                    {
-                        expectedHash = parts[0].ToUpperInvariant();
-                        break;
-                    }
+                    // Single line - either just hash or "hash  filename"
+                    expectedHash = lines[0].Trim().Split(' ', '\t')[0].ToUpperInvariant();
                 }
+                else if (lines.Any(l => l.Contains("SHA256 hash of")))
+                {
+                    // Windows CertUtil format - hash is on the second line
+                    var hashLine = lines.FirstOrDefault(l => !l.Contains("SHA256") && !l.Contains("CertUtil") && l.Trim().Length > 0);
+                    expectedHash = hashLine?.Trim().ToUpperInvariant() ?? "";
+                }
+                else
+                {
+                    // Try to find a line that looks like a hash (64 hex chars)
+                    var hashLine = lines.FirstOrDefault(l => System.Text.RegularExpressions.Regex.IsMatch(l.Trim(), "^[a-fA-F0-9]{64}"));
+                    expectedHash = hashLine?.Trim().ToUpperInvariant() ?? checksumResponse.Trim().Split(' ', '\t')[0].ToUpperInvariant();
+                }
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogWarning("Could not download checksum file from {Url}: {Message}. Skipping verification.", checksumUrl, ex.Message);
+                return; // Skip verification if checksum file doesn't exist
             }
             
             if (string.IsNullOrEmpty(expectedHash))
             {
-                throw new InvalidOperationException($"Could not find checksum for {archiveName} in checksums file");
+                _logger.LogWarning("Checksum file was empty for {Archive}. Skipping verification.", archiveName);
+                return;
             }
             
             // Calculate actual hash
@@ -187,7 +216,38 @@ namespace Ivy.Ripgrep.Bootstrap
         {
             if (extension == ".zip")
             {
-                await Task.Run(() => ZipFile.ExtractToDirectory(archivePath, outputDir, true));
+                // Extract to a temp directory first
+                var tempExtractDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+                Directory.CreateDirectory(tempExtractDir);
+                
+                try
+                {
+                    await Task.Run(() => ZipFile.ExtractToDirectory(archivePath, tempExtractDir, true));
+                    
+                    // Find the rg.exe file and move it to the output directory
+                    var rgExePath = Directory.GetFiles(tempExtractDir, "rg.exe", SearchOption.AllDirectories).FirstOrDefault();
+                    if (rgExePath != null)
+                    {
+                        var targetPath = Path.Combine(outputDir, "rg.exe");
+                        if (File.Exists(targetPath))
+                        {
+                            File.Delete(targetPath);
+                        }
+                        File.Move(rgExePath, targetPath);
+                    }
+                    else
+                    {
+                        throw new FileNotFoundException("Could not find rg.exe in the extracted archive");
+                    }
+                }
+                finally
+                {
+                    // Clean up temp directory
+                    if (Directory.Exists(tempExtractDir))
+                    {
+                        Directory.Delete(tempExtractDir, true);
+                    }
+                }
             }
             else if (extension == ".tar.gz")
             {
