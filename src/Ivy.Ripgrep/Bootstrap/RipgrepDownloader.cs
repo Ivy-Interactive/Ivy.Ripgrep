@@ -349,11 +349,26 @@ namespace Ivy.Ripgrep.Bootstrap
 
         protected virtual string GetCacheDirectory()
         {
-            var baseDir = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-                ? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)
-                : RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
-                    ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), "Library", "Caches")
-                    : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), ".cache");
+            string baseDir;
+            
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                baseDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            }
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            {
+                var home = Environment.GetFolderPath(Environment.SpecialFolder.Personal);
+                if (string.IsNullOrEmpty(home))
+                    home = Environment.GetEnvironmentVariable("HOME") ?? "/tmp";
+                baseDir = Path.Combine(home, "Library", "Caches");
+            }
+            else // Linux and other Unix-like systems
+            {
+                var home = Environment.GetFolderPath(Environment.SpecialFolder.Personal);
+                if (string.IsNullOrEmpty(home))
+                    home = Environment.GetEnvironmentVariable("HOME") ?? "/tmp";
+                baseDir = Path.Combine(home, ".cache");
+            }
 
             return Path.Combine(baseDir, "Ivy.Ripgrep", "bin");
         }
