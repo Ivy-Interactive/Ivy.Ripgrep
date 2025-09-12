@@ -18,8 +18,15 @@ using Xunit;
 
 namespace Ivy.Ripgrep.Tests
 {
-    public class ErrorHandlingTests
+    public class ErrorHandlingTests : IDisposable
     {
+        private readonly string _testCacheDir;
+
+        public ErrorHandlingTests()
+        {
+            _testCacheDir = Path.Combine(Path.GetTempPath(), $"Ivy.Ripgrep.Tests.{Guid.NewGuid()}");
+        }
+
         [Fact]
         public async Task RipgrepDownloader_WithNetworkError_ThrowsHttpRequestException()
         {
@@ -34,7 +41,9 @@ namespace Ivy.Ripgrep.Tests
                 .ThrowsAsync(new HttpRequestException("Network error"));
 
             var httpClient = new HttpClient(mockHttpMessageHandler.Object);
-            var downloader = new RipgrepDownloader(httpClient, NullLogger<RipgrepDownloader>.Instance);
+            
+            // Use TestableRipgrepDownloader with temp directory to avoid cached binaries
+            var downloader = new TestableRipgrepDownloader(_testCacheDir, httpClient);
 
             // Act & Assert
             await Assert.ThrowsAsync<HttpRequestException>(
@@ -240,7 +249,52 @@ namespace Ivy.Ripgrep.Tests
             results.Should().BeEmpty(); // Should handle malformed JSON gracefully
         }
 
+        public void Dispose()
+        {
+            try
+            {
+                if (Directory.Exists(_testCacheDir))
+                {
+                    Directory.Delete(_testCacheDir, true);
+                }
+            }
+            catch { /* Best effort cleanup */ }
+        }
+
         // Helper classes for testing
+        private class TestableRipgrepDownloader : RipgrepDownloader
+        {
+            private static string? _overrideCacheDir;
+
+            static TestableRipgrepDownloader()
+            {
+                _overrideCacheDir = null;
+            }
+
+            public TestableRipgrepDownloader(string cacheDir, HttpClient? httpClient = null, bool verifyChecksums = true)
+                : base(SetCacheDir(cacheDir, httpClient), NullLogger<RipgrepDownloader>.Instance, verifyChecksums)
+            {
+            }
+
+            private static HttpClient? SetCacheDir(string cacheDir, HttpClient? httpClient)
+            {
+                _overrideCacheDir = cacheDir;
+                return httpClient;
+            }
+
+            protected override string GetCacheDirectory()
+            {
+                return _overrideCacheDir ?? base.GetCacheDirectory();
+            }
+
+            public bool VerifyChecksumsEnabled => _verifyChecksums;
+
+            public Task TestVerifyChecksum(string version, string archiveName, string archivePath)
+            {
+                return VerifyChecksumAsync(version, archiveName, archivePath, CancellationToken.None);
+            }
+        }
+
         private class TestableDownloader : RipgrepDownloader
         {
             public TestableDownloader() : base(null, NullLogger<RipgrepDownloader>.Instance, false)

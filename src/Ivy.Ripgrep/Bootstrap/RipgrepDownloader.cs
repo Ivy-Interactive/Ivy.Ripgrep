@@ -316,8 +316,34 @@ namespace Ivy.Ripgrep.Bootstrap
         {
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) || RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
             {
-                var info = new FileInfo(filePath);
-                info.IsReadOnly = false;
+                // On Unix-like systems, we need to set the executable bit using chmod
+                // since netstandard2.1 doesn't have UnixFileMode
+                try
+                {
+                    using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = "chmod",
+                        Arguments = $"+x \"{filePath}\"",
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        RedirectStandardError = true,
+                        RedirectStandardOutput = true
+                    });
+                    
+                    if (process != null)
+                    {
+                        process.WaitForExit();
+                        if (process.ExitCode != 0)
+                        {
+                            var error = process.StandardError.ReadToEnd();
+                            _logger.LogWarning("Failed to set executable permission on {FilePath}: {Error}", filePath, error);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to set executable permission on {FilePath}", filePath);
+                }
             }
         }
 

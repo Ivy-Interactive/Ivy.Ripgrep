@@ -142,7 +142,7 @@ namespace Ivy.Ripgrep.Tests
             // Act & Assert
             var act = async () => await downloader.TestVerifyChecksum("14.1.1", "ripgrep-14.1.1-x86_64-pc-windows-msvc.zip", testFile);
             await act.Should().ThrowAsync<InvalidOperationException>()
-                .WithMessage("*Could not find checksum*");
+                .WithMessage("*Checksum verification failed*");
         }
 
         [Fact]
