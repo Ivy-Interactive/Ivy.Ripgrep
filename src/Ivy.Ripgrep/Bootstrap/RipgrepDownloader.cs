@@ -261,53 +261,86 @@ namespace Ivy.Ripgrep.Bootstrap
 
         private async Task ExtractTarGzAsync(string archivePath, string outputDir)
         {
-            using var fileStream = File.OpenRead(archivePath);
-            using var gzipStream = new GZipStream(fileStream, CompressionMode.Decompress);
-            using var memoryStream = new MemoryStream();
-            await gzipStream.CopyToAsync(memoryStream);
-            memoryStream.Seek(0, SeekOrigin.Begin);
+            // First extract to a temp directory
+            var tempExtractDir = Path.Combine(Path.GetTempPath(), $"ripgrep_extract_{Guid.NewGuid()}");
+            Directory.CreateDirectory(tempExtractDir);
 
-            var buffer = new byte[512];
-            while (memoryStream.Read(buffer, 0, 512) == 512)
+            try
             {
-                var name = Encoding.ASCII.GetString(buffer, 0, 100).TrimEnd('\0');
-                if (string.IsNullOrWhiteSpace(name))
-                    break;
+                using var fileStream = File.OpenRead(archivePath);
+                using var gzipStream = new GZipStream(fileStream, CompressionMode.Decompress);
+                using var memoryStream = new MemoryStream();
+                await gzipStream.CopyToAsync(memoryStream);
+                memoryStream.Seek(0, SeekOrigin.Begin);
 
-                var sizeStr = Encoding.ASCII.GetString(buffer, 124, 11).TrimEnd('\0');
-                var size = Convert.ToInt64(sizeStr, 8);
-
-                if (name.EndsWith("/"))
+                var buffer = new byte[512];
+                while (memoryStream.Read(buffer, 0, 512) == 512)
                 {
-                    Directory.CreateDirectory(Path.Combine(outputDir, name));
-                }
-                else if (size > 0)
-                {
-                    var filePath = Path.Combine(outputDir, name);
-                    Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+                    var name = Encoding.ASCII.GetString(buffer, 0, 100).TrimEnd('\0');
+                    if (string.IsNullOrWhiteSpace(name))
+                        break;
 
-                    await using var outputFile = File.Create(filePath);
-                    var remaining = size;
-                    var fileBuffer = new byte[4096];
-                    while (remaining > 0)
+                    var sizeStr = Encoding.ASCII.GetString(buffer, 124, 11).TrimEnd('\0');
+                    var size = Convert.ToInt64(sizeStr, 8);
+
+                    if (name.EndsWith("/"))
                     {
-                        var toRead = (int)Math.Min(remaining, fileBuffer.Length);
-                        var read = memoryStream.Read(fileBuffer, 0, toRead);
-                        if (read == 0)
-                            break;
-                        outputFile.Write(fileBuffer, 0, read);
-                        remaining -= read;
+                        Directory.CreateDirectory(Path.Combine(tempExtractDir, name));
                     }
+                    else if (size > 0)
+                    {
+                        var filePath = Path.Combine(tempExtractDir, name);
+                        Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
 
-                    var padding = (512 - (size % 512)) % 512;
-                    if (padding > 0)
-                        memoryStream.Seek(padding, SeekOrigin.Current);
+                        await using var outputFile = File.Create(filePath);
+                        var remaining = size;
+                        var fileBuffer = new byte[4096];
+                        while (remaining > 0)
+                        {
+                            var toRead = (int)Math.Min(remaining, fileBuffer.Length);
+                            var read = memoryStream.Read(fileBuffer, 0, toRead);
+                            if (read == 0)
+                                break;
+                            outputFile.Write(fileBuffer, 0, read);
+                            remaining -= read;
+                        }
+
+                        var padding = (512 - (size % 512)) % 512;
+                        if (padding > 0)
+                            memoryStream.Seek(padding, SeekOrigin.Current);
+                    }
+                    else
+                    {
+                        var padding = (512 - (size % 512)) % 512;
+                        if (padding > 0)
+                            memoryStream.Seek(padding, SeekOrigin.Current);
+                    }
+                }
+
+                // Now find the rg binary and move it to the output directory
+                var rgPath = Directory.GetFiles(tempExtractDir, "rg", SearchOption.AllDirectories).FirstOrDefault()
+                    ?? Directory.GetFiles(tempExtractDir, "rg.exe", SearchOption.AllDirectories).FirstOrDefault();
+
+                if (rgPath != null)
+                {
+                    var targetPath = Path.Combine(outputDir, Path.GetFileName(rgPath));
+                    if (File.Exists(targetPath))
+                    {
+                        File.Delete(targetPath);
+                    }
+                    File.Move(rgPath, targetPath);
                 }
                 else
                 {
-                    var padding = (512 - (size % 512)) % 512;
-                    if (padding > 0)
-                        memoryStream.Seek(padding, SeekOrigin.Current);
+                    throw new FileNotFoundException("Could not find rg binary in the extracted archive");
+                }
+            }
+            finally
+            {
+                // Clean up temp directory
+                if (Directory.Exists(tempExtractDir))
+                {
+                    Directory.Delete(tempExtractDir, true);
                 }
             }
         }
