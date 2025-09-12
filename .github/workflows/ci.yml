@@ -8,6 +8,10 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: write  # Needed to create releases
+  packages: write  # Needed if publishing to GitHub Packages
+
 env:
   DOTNET_VERSION: '8.0.x'
   DOTNET_NOLOGO: true
