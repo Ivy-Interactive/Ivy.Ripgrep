@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>10.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <Version>1.0.0</Version>
+    <Authors>Ivy.Ripgrep Contributors</Authors>
+    <Description>A .NET wrapper for ripgrep with automatic binary provisioning</Description>
+    <PackageProjectUrl>https://github.com/Ivy-Interactive/Ivy.Ripgrep</PackageProjectUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>ripgrep;search;grep;rg;fast</PackageTags>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="7.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Properties\ThirdPartyNotices.txt" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>

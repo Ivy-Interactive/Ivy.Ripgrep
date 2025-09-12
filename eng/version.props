@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <DefaultRipgrepVersion>14.1.1</DefaultRipgrepVersion>
+    <VersionPrefix>1.0.0</VersionPrefix>
+    <VersionSuffix Condition="'$(CI)' != 'true'">dev</VersionSuffix>
+  </PropertyGroup>
+</Project>
