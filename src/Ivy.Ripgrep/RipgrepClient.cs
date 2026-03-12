@@ -86,10 +86,18 @@ namespace Ivy.Ripgrep
             CancellationToken ct = default)
         {
             var matches = new List<RipgrepMatch>();
-            
-            await foreach (var match in SearchAsync(options, ct))
+
+            try
             {
-                matches.Add(match);
+                await foreach (var match in SearchAsync(options, ct))
+                {
+                    matches.Add(match);
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                _logger.LogWarning("SearchBufferedAsync cancelled after collecting {Count} partial results", matches.Count);
+                // Return whatever partial results were collected before cancellation
             }
 
             return matches;
